@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import './App.css';
+import { API_BASE_URL } from './config';
 
 interface Major {
   id: number;
@@ -150,7 +151,7 @@ export default function App() {
 
   // 测试后端连接
   useEffect(() => {
-    fetch('/api/health')
+    fetch(`${API_BASE_URL}/health`)
       .then(r => r.json())
       .then(() => console.log('✓ 后端连接正常'))
       .catch(e => console.error('✗ 后端连接失败:', e.message));
@@ -240,7 +241,7 @@ export default function App() {
     }
 
     try {
-      const response = await fetch('/api/gaokao/query-score', {
+      const response = await fetch(`${API_BASE_URL}/gaokao/query-score`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ admissionNumber: admissionNumber.trim() }),
@@ -286,7 +287,7 @@ export default function App() {
       setMessage({ type: '', text: '' }); // 清除之前的消息
 
       // 调用后端 API 发送邮件验证码
-      const apiUrl = '/api/verification/send-code';
+      const apiUrl = `${API_BASE_URL}/verification/send-code`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
