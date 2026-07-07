@@ -5,7 +5,7 @@ services:
     runtime: node
     plan: free
     buildCommand: cd backend && npm install
-    startCommand: cd backend && npm start
+    startCommand: cd backend && node test-server.js
     envVars:
       - key: PORT
         value: "4000"
@@ -13,7 +13,7 @@ services:
         value: production
 
   # 前端服务
-  - type: static site
+  - type: static
     name: college-choice-frontend
     staticPublishPath: frontend/dist
     buildCommand: cd frontend && npm install && npm run build
