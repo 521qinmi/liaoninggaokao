@@ -884,11 +884,41 @@ export default function App() {
                           <td style={{ padding: '1rem' }}>{rec.plan06}/{rec.plan05}/{rec.plan04}/{rec.plan03}</td>
                           <td style={{ padding: '1rem', textAlign: 'center' }}>
                             {rec.plan06 > rec.plan05 ? (
-                              <span style={{ fontSize: '1.5rem', color: '#22c55e', fontWeight: 'bold' }}>↑</span>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: '2rem',
+                                color: '#22c55e',
+                                fontWeight: 'bold',
+                                backgroundColor: '#dcfce7',
+                                width: '3rem',
+                                height: '3rem',
+                                lineHeight: '3rem',
+                                borderRadius: '0.5rem'
+                              }}>↑</span>
                             ) : rec.plan06 < rec.plan05 ? (
-                              <span style={{ fontSize: '1.5rem', color: '#ef4444', fontWeight: 'bold' }}>↓</span>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: '2rem',
+                                color: '#ef4444',
+                                fontWeight: 'bold',
+                                backgroundColor: '#fee2e2',
+                                width: '3rem',
+                                height: '3rem',
+                                lineHeight: '3rem',
+                                borderRadius: '0.5rem'
+                              }}>↓</span>
                             ) : (
-                              <span style={{ fontSize: '1.5rem', color: '#6b7280', fontWeight: 'bold' }}>=</span>
+                              <span style={{
+                                display: 'inline-block',
+                                fontSize: '1.8rem',
+                                color: '#6b7280',
+                                fontWeight: 'bold',
+                                backgroundColor: '#f3f4f6',
+                                width: '3rem',
+                                height: '3rem',
+                                lineHeight: '3rem',
+                                borderRadius: '0.5rem'
+                              }}>=</span>
                             )}
                           </td>
                           <td style={{ padding: '1rem' }}>{rec.fy05}/{rec.rank05}</td>
