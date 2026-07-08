@@ -882,8 +882,14 @@ export default function App() {
                           <td style={{ padding: '1rem' }}>{rec.name}</td>
                           <td style={{ padding: '1rem' }}>{rec.major}</td>
                           <td style={{ padding: '1rem' }}>{rec.plan06}/{rec.plan05}/{rec.plan04}/{rec.plan03}</td>
-                          <td style={{ padding: '1rem', textAlign: 'center', fontSize: '1.2rem' }}>
-                            {rec.plan06 > rec.plan05 ? '↑' : rec.plan06 < rec.plan05 ? '↓' : '='}
+                          <td style={{ padding: '1rem', textAlign: 'center' }}>
+                            {rec.plan06 > rec.plan05 ? (
+                              <span style={{ fontSize: '1.5rem', color: '#22c55e', fontWeight: 'bold' }}>↑</span>
+                            ) : rec.plan06 < rec.plan05 ? (
+                              <span style={{ fontSize: '1.5rem', color: '#ef4444', fontWeight: 'bold' }}>↓</span>
+                            ) : (
+                              <span style={{ fontSize: '1.5rem', color: '#6b7280', fontWeight: 'bold' }}>=</span>
+                            )}
                           </td>
                           <td style={{ padding: '1rem' }}>{rec.fy05}/{rec.rank05}</td>
                           <td style={{ padding: '1rem' }}>{rec.fy04}/{rec.rank04}</td>
