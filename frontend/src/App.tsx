@@ -171,8 +171,7 @@ export default function App() {
         nature: '985',
         name: '清华大学',
         major: '计算机科学与技术',
-        plan2024: 80,
-        plan05: 75, plan04: 72, plan03: 70,
+        plan06: 80, plan05: 75, plan04: 72, plan03: 70,
         fy05: score + 25, rank05: 45, fy04: score + 22, rank04: 52, fy03: score + 20, rank03: 58
       },
       {
@@ -857,8 +856,8 @@ export default function App() {
                         <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>学校性质</th>
                         <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>学校名称</th>
                         <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>专业名称</th>
-                        <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>今年计划人数</th>
-                        <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>05/04/03计划人数</th>
+                        <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>06/05/04/03计划人数</th>
+                        <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>计划变动</th>
                         <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>05年最低分数/排名</th>
                         <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>04年最低分数/排名</th>
                         <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600' }}>03年最低分数/排名</th>
@@ -882,8 +881,10 @@ export default function App() {
                           <td style={{ padding: '1rem' }}>{rec.nature}</td>
                           <td style={{ padding: '1rem' }}>{rec.name}</td>
                           <td style={{ padding: '1rem' }}>{rec.major}</td>
-                          <td style={{ padding: '1rem' }}>{rec.plan2024}</td>
-                          <td style={{ padding: '1rem' }}>{rec.plan05}/{rec.plan04}/{rec.plan03}</td>
+                          <td style={{ padding: '1rem' }}>{rec.plan06}/{rec.plan05}/{rec.plan04}/{rec.plan03}</td>
+                          <td style={{ padding: '1rem', textAlign: 'center', fontSize: '1.2rem' }}>
+                            {rec.plan06 > rec.plan05 ? '↑' : rec.plan06 < rec.plan05 ? '↓' : '='}
+                          </td>
                           <td style={{ padding: '1rem' }}>{rec.fy05}/{rec.rank05}</td>
                           <td style={{ padding: '1rem' }}>{rec.fy04}/{rec.rank04}</td>
                           <td style={{ padding: '1rem' }}>{rec.fy03}/{rec.rank03}</td>
