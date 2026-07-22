@@ -8,11 +8,12 @@ export default defineConfig({
     'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL || ''),
   },
   server: {
-    host: '0.0.0.0',
-    port: 9999,
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:4000',
+        target: 'http://127.0.0.1:5001',
         changeOrigin: true,
       },
     },

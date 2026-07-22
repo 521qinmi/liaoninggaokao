@@ -26,20 +26,145 @@ interface CarouselItem {
   description: string;
 }
 
+// 院校推荐库（来自数据库，含相对分数偏移）
+interface College {
+  id: number;
+  level: string;
+  nature: string;
+  name: string;
+  major: string;
+  plan06: number;
+  plan05: number;
+  plan04: number;
+  plan03: number;
+  off05: number; rank05: number;
+  off04: number; rank04: number;
+  off03: number; rank03: number;
+}
+
+// 结合考生分数计算出的推荐项
+interface Recommendation {
+  level: string;
+  nature: string;
+  name: string;
+  major: string;
+  plan06: number; plan05: number; plan04: number; plan03: number;
+  fy05: number; rank05: number;
+  fy04: number; rank04: number;
+  fy03: number; rank03: number;
+}
+
+interface VolunteerData {
+  score: string;
+  ranking: string;
+  lastYearScore: string;
+  province: string;
+  physicsOrHistory: string;
+  subjects: string[];
+}
+
+interface UserProfile extends VolunteerData {
+  email: string;
+  name: string;
+}
+
+const emptyVolunteerData: VolunteerData = {
+  score: '',
+  ranking: '',
+  lastYearScore: '',
+  province: '',
+  physicsOrHistory: '',
+  subjects: [],
+};
+
+const calculateLastYearScore = (scoreValue: string, rankingValue: string) => {
+  const score = Number(scoreValue);
+  const ranking = Number(rankingValue);
+
+  if (!score || !ranking) return '';
+
+  let adjustment = 20;
+  if (ranking <= 500) adjustment = 5;
+  else if (ranking <= 2000) adjustment = 8;
+  else if (ranking <= 10000) adjustment = 12;
+  else if (ranking <= 30000) adjustment = 16;
+
+  return String(Math.max(score - adjustment, 0));
+};
+
+const normalizeVolunteerData = (data: Partial<VolunteerData>): VolunteerData => {
+  const score = data.score || '';
+  const ranking = data.ranking || '';
+
+  return {
+    score,
+    ranking,
+    lastYearScore: calculateLastYearScore(score, ranking),
+    province: data.province || '',
+    physicsOrHistory: data.physicsOrHistory || '',
+    subjects: Array.isArray(data.subjects) ? data.subjects : [],
+  };
+};
+
+const getVolunteerDataFromUser = (user: UserProfile | null): VolunteerData => normalizeVolunteerData({
+  score: user?.score || '',
+  ranking: user?.ranking || '',
+  province: user?.province || '',
+  physicsOrHistory: user?.physicsOrHistory || '',
+  subjects: Array.isArray(user?.subjects) ? user.subjects : [],
+});
+
+const isVolunteerDataComplete = (data: VolunteerData) => Boolean(
+  data.score &&
+  data.ranking &&
+  calculateLastYearScore(data.score, data.ranking) &&
+  data.province &&
+  data.physicsOrHistory &&
+  data.subjects.length === 2
+);
+
+
 export default function App() {
   const [carousel, setCarousel] = useState<CarouselItem[]>([]);
   const [majors, setMajors] = useState<Major[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [colleges, setColleges] = useState<College[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        return {
+          ...emptyVolunteerData,
+          ...parsed,
+          subjects: Array.isArray(parsed.subjects) ? parsed.subjects : [],
+        };
+      } catch (e) {
+        localStorage.removeItem('currentUser');
+      }
+    }
+
+    return localStorage.getItem('isLoggedIn') === 'true'
+      ? { ...emptyVolunteerData, email: '已登录用户', name: '用户' }
+      : null;
+  });
+  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('isLoggedIn') === 'true' || Boolean(localStorage.getItem('currentUser')));
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [pendingVolunteerStart, setPendingVolunteerStart] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // 登录表单状态
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
 
   // 注册表单状态
   const [email, setEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [generatedCode, setGeneratedCode] = useState('');
   const [codeCount, setCodeCount] = useState(0);
+  const [sendingCode, setSendingCode] = useState(false);
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -47,8 +172,13 @@ export default function App() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState({ type: '', text: '' });
 
+  // 注册/个人信息表单状态
+  const [profileForm, setProfileForm] = useState<VolunteerData>(() => getVolunteerDataFromUser(currentUser));
+  const [isProfileEditing, setIsProfileEditing] = useState(false);
+  const [profileMessage, setProfileMessage] = useState({ type: '', text: '' });
+
   // 页面状态 - 从 localStorage 初始化
-  const [currentPage, setCurrentPage] = useState<'home' | 'volunteer' | 'recommendation'>(() => {
+  const [currentPage, setCurrentPage] = useState<'home' | 'volunteer' | 'recommendation' | 'profile'>(() => {
     const saved = localStorage.getItem('volunteerState');
     if (saved) {
       try {
@@ -97,14 +227,7 @@ export default function App() {
         };
       }
     }
-    return {
-      score: '',
-      ranking: '',
-      lastYearScore: '',
-      province: '',
-      physicsOrHistory: '',
-      subjects: [] as string[],
-    };
+    return getVolunteerDataFromUser(currentUser);
   });
   const [provinceSearch, setProvinceSearch] = useState('');
   const [showProvinceDropdown, setShowProvinceDropdown] = useState(false);
@@ -162,64 +285,29 @@ export default function App() {
     return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/.test(value);
   };
 
+  // 逐条密码规则（用于输入时实时校验提示）
+  const getPasswordChecks = (value: string) => [
+    { label: '至少 8 位', ok: value.length >= 8 },
+    { label: '含小写字母', ok: /[a-z]/.test(value) },
+    { label: '含大写字母', ok: /[A-Z]/.test(value) },
+    { label: '含数字', ok: /\d/.test(value) },
+    { label: '含特殊字符 @$!%*?&', ok: /[@$!%*?&]/.test(value) },
+  ];
+
   // 推荐算法
-  const generateRecommendations = (lastYearScore: string) => {
+  const generateRecommendations = (lastYearScore: string): Recommendation[] => {
     const score = parseInt(lastYearScore);
-    const recommendations = [
-      {
-        level: '冲',
-        nature: '985',
-        name: '清华大学',
-        major: '计算机科学与技术',
-        plan06: 80, plan05: 75, plan04: 72, plan03: 70,
-        fy05: score + 25, rank05: 45, fy04: score + 22, rank04: 52, fy03: score + 20, rank03: 58
-      },
-      {
-        level: '冲',
-        nature: '211',
-        name: '北京大学',
-        major: '数学与应用数学',
-        plan2024: 70,
-        plan05: 68, plan04: 65, plan03: 62,
-        fy05: score + 23, rank05: 55, fy04: score + 21, rank04: 62, fy03: score + 18, rank03: 70
-      },
-      {
-        level: '稳',
-        nature: '双一流',
-        name: '复旦大学',
-        major: '物理学',
-        plan2024: 120,
-        plan05: 110, plan04: 108, plan03: 105,
-        fy05: score + 5, rank05: 245, fy04: score + 3, rank04: 258, fy03: score + 2, rank03: 270
-      },
-      {
-        level: '稳',
-        nature: '省重点',
-        name: '浙江大学',
-        major: '电子信息工程',
-        plan2024: 150,
-        plan05: 140, plan04: 138, plan03: 135,
-        fy05: score + 8, rank05: 210, fy04: score + 5, rank04: 225, fy03: score + 4, rank03: 240
-      },
-      {
-        level: '保',
-        nature: '双高计划',
-        name: '南京大学',
-        major: '化学',
-        plan2024: 100,
-        plan05: 95, plan04: 92, plan03: 90,
-        fy05: score - 15, rank05: 850, fy04: score - 12, rank04: 920, fy03: score - 10, rank03: 1000
-      },
-      {
-        level: '保',
-        nature: '公办',
-        name: '武汉大学',
-        major: '地质学',
-        plan2024: 90,
-        plan05: 85, plan04: 82, plan03: 80,
-        fy05: score - 12, rank05: 750, fy04: score - 10, rank04: 820, fy03: score - 8, rank03: 900
-      }
-    ];
+    // 基于数据库中的院校库，结合考生分数计算分数线
+    const recommendations: Recommendation[] = colleges.map((c) => ({
+      level: c.level,
+      nature: c.nature,
+      name: c.name,
+      major: c.major,
+      plan06: c.plan06, plan05: c.plan05, plan04: c.plan04, plan03: c.plan03,
+      fy05: score + c.off05, rank05: c.rank05,
+      fy04: score + c.off04, rank04: c.rank04,
+      fy03: score + c.off03, rank03: c.rank03,
+    }));
 
     if (score >= 680) {
       return recommendations.filter((_, i) => i < 6);
@@ -230,6 +318,165 @@ export default function App() {
     } else {
       return recommendations.filter((_, i) => i >= 3).slice(0, 3);
     }
+  };
+
+  const handleStartVolunteer = () => {
+    if (!isLoggedIn) {
+      setPendingVolunteerStart(true);
+      setAuthMode('register');
+      setProfileForm(emptyVolunteerData);
+      setShowAuth(true);
+      setMessage({ type: 'error', text: '请先注册并填写个人信息，注册成功后即可生成志愿推荐' });
+      return;
+    }
+
+    const userVolunteerData = getVolunteerDataFromUser(currentUser);
+    if (!isVolunteerDataComplete(userVolunteerData)) {
+      setProfileForm(userVolunteerData);
+      setIsProfileEditing(true);
+      setProfileMessage({ type: 'error', text: '请先完善个人信息，系统将根据这些信息生成志愿推荐' });
+      setCurrentPage('profile');
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    setSubmitData(userVolunteerData);
+    setCurrentPage('recommendation');
+    window.scrollTo(0, 0);
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!loginEmail || !loginPassword) {
+      setMessage({ type: 'error', text: '请输入邮箱和密码' });
+      return;
+    }
+
+    // 向数据库（后端）校验登录
+    let user: UserProfile;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.user) {
+        setMessage({ type: 'error', text: data.error || '邮箱或密码错误' });
+        return;
+      }
+      user = {
+        ...emptyVolunteerData,
+        ...data.user,
+        subjects: Array.isArray(data.user.subjects) ? data.user.subjects : [],
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setMessage({ type: 'error', text: `网络错误: ${errorMsg}` });
+      return;
+    }
+
+    localStorage.setItem('isLoggedIn', 'true');
+    localStorage.setItem('currentUser', JSON.stringify(user));
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    setShowProfileMenu(false);
+    setMessage({ type: 'success', text: '登录成功！' });
+
+    setTimeout(() => {
+      setShowAuth(false);
+      setLoginEmail('');
+      setLoginPassword('');
+      setMessage({ type: '', text: '' });
+
+      if (pendingVolunteerStart) {
+        setPendingVolunteerStart(false);
+        const userVolunteerData = getVolunteerDataFromUser(user);
+        if (isVolunteerDataComplete(userVolunteerData)) {
+          setSubmitData(userVolunteerData);
+          setCurrentPage('recommendation');
+        } else {
+          setProfileForm(userVolunteerData);
+          setIsProfileEditing(true);
+          setProfileMessage({ type: 'error', text: '请先完善个人信息，系统将根据这些信息生成志愿推荐' });
+          setCurrentPage('profile');
+        }
+        window.scrollTo(0, 0);
+      }
+    }, 600);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('volunteerState');
+    setCurrentUser(null);
+    setProfileForm(emptyVolunteerData);
+    setSubmitData(emptyVolunteerData);
+    setIsProfileEditing(false);
+    setIsLoggedIn(false);
+    setShowProfileMenu(false);
+    setPendingVolunteerStart(false);
+    setProfileMessage({ type: '', text: '' });
+    setCurrentPage('home');
+  };
+
+  const handleSaveProfile = async (options?: { goRecommendation?: boolean }) => {
+    if (!currentUser) return;
+
+    const normalizedProfile = normalizeVolunteerData(profileForm);
+
+    if (!isVolunteerDataComplete(normalizedProfile)) {
+      setProfileMessage({ type: 'error', text: '请完整填写成绩、排名、省份、物理/历史和两门选科' });
+      return;
+    }
+
+    const updatedUser: UserProfile = {
+      ...currentUser,
+      ...normalizedProfile,
+      subjects: [...normalizedProfile.subjects],
+    };
+
+    // 保存到数据库（后端）
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedUser),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setProfileMessage({ type: 'error', text: data.error || '保存失败，请重试' });
+        return;
+      }
+      if (data.user) Object.assign(updatedUser, data.user);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setProfileMessage({ type: 'error', text: `网络错误: ${errorMsg}` });
+      return;
+    }
+
+    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+    setCurrentUser(updatedUser);
+    setSubmitData(getVolunteerDataFromUser(updatedUser));
+    setIsProfileEditing(false);
+    setProfileMessage({ type: 'success', text: '个人信息已保存' });
+
+    if (options?.goRecommendation) {
+      setCurrentPage('recommendation');
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const toggleProfileSubject = (subject: string) => {
+    setProfileForm((prev) => {
+      if (prev.subjects.includes(subject)) {
+        return { ...prev, subjects: prev.subjects.filter(s => s !== subject) };
+      }
+      if (prev.subjects.length >= 2) return prev;
+      return { ...prev, subjects: [...prev.subjects, subject] };
+    });
   };
 
   // 查询高考成绩
@@ -249,14 +496,15 @@ export default function App() {
       const result = await response.json();
 
       if (result.success) {
-        setVolunteerForm({
-          score: String(result.data.score),
-          ranking: String(result.data.ranking),
-          lastYearScore: String(result.data.lastYearScore),
-          province: result.data.province,
-          physicsOrHistory: result.data.physicsOrHistory,
-          subjects: result.data.subjects.split('、'),
+        const queriedData = normalizeVolunteerData({
+          score: String(result.data.score || ''),
+          ranking: String(result.data.ranking || ''),
+          province: result.data.province || '',
+          physicsOrHistory: result.data.physicsOrHistory || '',
+          subjects: result.data.subjects ? result.data.subjects.split('、') : [],
         });
+        setVolunteerForm(queriedData);
+        setProfileForm(queriedData);
         setQueryMessage({ type: 'success', text: result.data.message });
         setAdmissionNumber('');
       } else {
@@ -283,55 +531,40 @@ export default function App() {
     }
 
     try {
+      setSendingCode(true);
       setMessage({ type: '', text: '' }); // 清除之前的消息
 
-      // 调用后端 API 发送邮件验证码
-      const apiUrl = `${API_BASE_URL}/verification/send-code`;
-
-      const response = await fetch(apiUrl, {
+      // 调用后端发送邮箱验证码
+      const response = await fetch(`${API_BASE_URL}/verification/send-code`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
 
-      // 检查响应状态
-      if (!response.ok) {
-        const contentType = response.headers.get('content-type');
-        let errorMessage = `HTTP ${response.status}`;
-
-        try {
-          if (contentType && contentType.includes('application/json')) {
-            const data = await response.json();
-            errorMessage = data.message || errorMessage;
-          }
-        } catch (e) {
-          // 如果 JSON 解析失败，使用 HTTP 状态码
-        }
-
-        setMessage({ type: 'error', text: `发送失败: ${errorMessage}` });
-        return;
+      let data: { success?: boolean; message?: string } = {};
+      try {
+        data = await response.json();
+      } catch {
+        // 非 JSON 响应（如代理层错误）
       }
 
-      const data = await response.json();
-
-      if (data.success) {
-        // 后端成功，生成本地验证码（不显示给用户）
-        const code = String(Math.floor(100000 + Math.random() * 900000));
-        setGeneratedCode(code);
+      if (response.ok && data.success) {
         setCodeCount(60);
-        setMessage({ type: 'success', text: `验证码已发送到 ${email}，请查收` });
         setErrors({});
+        setMessage({ type: 'success', text: data.message || '验证码已发送到您的邮箱，请查收' });
+      } else if (response.status === 409) {
+        // 邮箱已注册：在邮箱框下提示，并引导去登录
+        setErrors({ email: data.message || '该邮箱已注册，请直接登录' });
+        setMessage({ type: 'error', text: data.message || '该邮箱已注册，请直接登录' });
       } else {
-        // 显示后端返回的错误信息
-        setMessage({ type: 'error', text: data.message || '发送验证码失败，请重试' });
+        setMessage({ type: 'error', text: `发送失败: ${data.message || `HTTP ${response.status}`}` });
       }
     } catch (error) {
-      // 后端连接错误
       console.error('发送验证码异常:', error);
       const errorMsg = error instanceof Error ? error.message : '未知错误';
       setMessage({ type: 'error', text: `网络错误: ${errorMsg}` });
+    } finally {
+      setSendingCode(false);
     }
   };
 
@@ -344,7 +577,7 @@ export default function App() {
   }, [codeCount]);
 
   // 处理注册
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const newErrors: Record<string, string> = {};
 
@@ -356,8 +589,6 @@ export default function App() {
 
     if (!verificationCode) {
       newErrors.code = '请输入验证码';
-    } else if (verificationCode !== generatedCode) {
-      newErrors.code = '验证码错误';
     }
 
     if (!password) {
@@ -372,12 +603,74 @@ export default function App() {
       newErrors.passwordConfirm = '两次密码输入不一致';
     }
 
+    if (!isVolunteerDataComplete(profileForm)) {
+      newErrors.profile = '请完整填写成绩、排名、省份、物理/历史和两门选科';
+    }
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
-    setMessage({ type: 'success', text: '注册成功！' });
+    // 向后端校验邮箱验证码
+    try {
+      const response = await fetch(`${API_BASE_URL}/verification/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: verificationCode }),
+      });
+
+      let data: { success?: boolean; message?: string } = {};
+      try {
+        data = await response.json();
+      } catch {
+        // 忽略非 JSON 响应
+      }
+
+      if (!response.ok || !data.success) {
+        setErrors({ code: data.message || '验证码校验失败' });
+        return;
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setMessage({ type: 'error', text: `网络错误: ${errorMsg}` });
+      return;
+    }
+
+    const normalizedProfile = normalizeVolunteerData(profileForm);
+    const user: UserProfile = {
+      ...normalizedProfile,
+      email,
+      name: email.split('@')[0] || '用户',
+      subjects: [...normalizedProfile.subjects],
+    };
+
+    // 写入数据库（后端）
+    try {
+      const regRes = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...user, password }),
+      });
+      const regData = await regRes.json().catch(() => ({}));
+      if (!regRes.ok) {
+        setErrors({ email: regData.error || '注册失败，请重试' });
+        return;
+      }
+      // 以数据库返回的用户为准
+      if (regData.user) Object.assign(user, regData.user);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      setMessage({ type: 'error', text: `网络错误: ${errorMsg}` });
+      return;
+    }
+
+    localStorage.setItem('isLoggedIn', 'true');
+    localStorage.setItem('currentUser', JSON.stringify(user));
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    setSubmitData(getVolunteerDataFromUser(user));
+    setMessage({ type: 'success', text: '注册成功！已为您保存个人信息' });
     setTimeout(() => {
       setShowAuth(false);
       setEmail('');
@@ -385,35 +678,38 @@ export default function App() {
       setPassword('');
       setPasswordConfirm('');
       setMessage({ type: '', text: '' });
-    }, 2000);
+      if (pendingVolunteerStart) {
+        setPendingVolunteerStart(false);
+        setCurrentPage('recommendation');
+      } else {
+        setCurrentPage('profile');
+      }
+      window.scrollTo(0, 0);
+    }, 800);
   };
 
   useEffect(() => {
-    // 使用静态数据
-    setCarousel([
-      { id: 1, title: '计算机科学与技术', description: '当今最热门的技术专业，就业前景广阔' },
-      { id: 2, title: '人工智能', description: '未来科技的核心，引领数字时代' },
-      { id: 3, title: '数据科学与大数据技术', description: '数据驱动决策的时代已来' },
-    ]);
+    // 从数据库（后端）加载首页数据与院校库
+    const loadData = async () => {
+      try {
+        const [homeRes, collegesRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/home/data`),
+          fetch(`${API_BASE_URL}/home/colleges`),
+        ]);
+        const home = await homeRes.json();
+        const collegeList = await collegesRes.json();
 
-    setMajors([
-      { id: 1, name: '计算机科学与技术', category: '工科', description: '培养掌握计算机软硬件知识的高级技术人才', job_prospects: '优秀', avg_salary: 18000 },
-      { id: 2, name: '人工智能', category: '工科', description: '学习深度学习、机器学习等前沿技术', job_prospects: '优秀', avg_salary: 20000 },
-      { id: 3, name: '数据科学与大数据技术', category: '工科', description: '培养大数据处理和分析人才', job_prospects: '优秀', avg_salary: 17000 },
-      { id: 4, name: '财务管理', category: '管理', description: '培养财务管理专业人才', job_prospects: '良好', avg_salary: 12000 },
-      { id: 5, name: '法学', category: '法学', description: '培养法律专业人才', job_prospects: '良好', avg_salary: 11000 },
-      { id: 6, name: '医学', category: '医学', description: '培养医疗卫生专业人才', job_prospects: '优秀', avg_salary: 14000 },
-    ]);
-
-    setNews([
-      { id: 1, title: '2024年高考报名人数突破新高', content: '今年高考考生人数创历史新高，各校录取竞争更加激烈', category: '行业动态', views: 1200, created_at: new Date().toISOString() },
-      { id: 2, title: 'AI时代来临，这些专业最吃香', content: '随着人工智能发展，相关专业就业前景持续看好', category: '就业前景', views: 980, created_at: new Date(Date.now() - 86400000).toISOString() },
-      { id: 3, title: '大学四年应该如何选择专业方向', content: '专业选择决定职业发展，选对专业很关键', category: '专业指导', views: 756, created_at: new Date(Date.now() - 172800000).toISOString() },
-      { id: 4, title: '教育部发布2024年高考改革新政', content: '多项改革政策出台，将影响未来几年高考', category: '政策解读', views: 1450, created_at: new Date(Date.now() - 259200000).toISOString() },
-      { id: 5, title: '名校开设新专业，应对产业升级', content: '清华北大等高校纷纷设立新兴产业相关专业', category: '校园新闻', views: 890, created_at: new Date(Date.now() - 345600000).toISOString() },
-    ]);
-
-    setLoading(false);
+        setCarousel(Array.isArray(home.carousel) ? home.carousel : []);
+        setMajors(Array.isArray(home.featuredMajors) ? home.featuredMajors : []);
+        setNews(Array.isArray(home.news) ? home.news : []);
+        setColleges(Array.isArray(collegeList) ? collegeList : []);
+      } catch (error) {
+        console.error('加载首页数据失败:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
   // 获取完整推荐列表
@@ -461,8 +757,357 @@ export default function App() {
   const nextSlide = () => setCurrentSlide((prev) => (prev + 1) % carousel.length);
   const prevSlide = () => setCurrentSlide((prev) => (prev - 1 + carousel.length) % carousel.length);
 
+  const renderProfileSummary = (data: VolunteerData) => (
+    <div className="profile-summary-grid">
+      <div className="profile-summary-item">
+        <span>高考成绩</span>
+        <strong>{data.score || '未填写'}{data.score && ' 分'}</strong>
+      </div>
+      <div className="profile-summary-item">
+        <span>省排名</span>
+        <strong>{data.ranking ? `第 ${data.ranking} 名` : '未填写'}</strong>
+      </div>
+      <div className="profile-summary-item">
+        <span>去年等同分数</span>
+        <strong>{calculateLastYearScore(data.score, data.ranking) || '待计算'}{calculateLastYearScore(data.score, data.ranking) && ' 分'}</strong>
+      </div>
+      <div className="profile-summary-item">
+        <span>所在省份</span>
+        <strong>{data.province || '未填写'}</strong>
+      </div>
+      <div className="profile-summary-item">
+        <span>物理/历史</span>
+        <strong>{data.physicsOrHistory || '未选择'}</strong>
+      </div>
+      <div className="profile-summary-item">
+        <span>选科</span>
+        <strong>{data.subjects.length ? data.subjects.join('、') : '未选择'}</strong>
+      </div>
+    </div>
+  );
+
+  const renderProfileFields = (options?: { hideLastYearScore?: boolean }) => (
+    <div className="profile-form-grid editing">
+      <div className="form-group compact-field">
+        <label>高考成绩</label>
+        <input
+          type="text"
+          placeholder="如：620"
+          value={profileForm.score}
+          onChange={(e) => setProfileForm({ ...profileForm, score: e.target.value.replace(/[^0-9]/g, '') })}
+        />
+      </div>
+
+      <div className="form-group compact-field">
+        <label>省排名</label>
+        <input
+          type="text"
+          placeholder="如：12000"
+          value={profileForm.ranking}
+          onChange={(e) => setProfileForm({ ...profileForm, ranking: e.target.value.replace(/[^0-9]/g, '') })}
+        />
+      </div>
+
+      {!options?.hideLastYearScore && (
+        <div className="form-group compact-field">
+          <label>去年等同分数</label>
+          <div className="calculated-score-box">
+            {calculateLastYearScore(profileForm.score, profileForm.ranking) || '填写成绩和排名后自动计算'}
+            {calculateLastYearScore(profileForm.score, profileForm.ranking) && <span>分</span>}
+          </div>
+          <p className="field-help">根据高考成绩和省排名自动换算，无需手动填写。</p>
+        </div>
+      )}
+
+      <div className="form-group compact-field" style={{ position: 'relative' }}>
+        <label>所在省份</label>
+        <input
+          type="text"
+          placeholder="输入或选择省份"
+          value={profileForm.province}
+          onChange={(e) => {
+            setProfileForm({ ...profileForm, province: e.target.value });
+            setProvinceSearch(e.target.value);
+            setShowProvinceDropdown(true);
+          }}
+          onFocus={() => setShowProvinceDropdown(true)}
+          onBlur={() => setTimeout(() => setShowProvinceDropdown(false), 200)}
+        />
+        {showProvinceDropdown && filteredProvinces.length > 0 && (
+          <div className="profile-select-dropdown">
+            {filteredProvinces.map((province) => (
+              <div
+                key={province}
+                className="profile-select-option"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setProfileForm({ ...profileForm, province });
+                  setProvinceSearch('');
+                  setShowProvinceDropdown(false);
+                }}
+              >
+                {province}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="form-group compact-field stack-col1">
+        <label>物理/历史（二选一）</label>
+        <div className="choice-group">
+          {['物理', '历史'].map(option => (
+            <button
+              key={option}
+              type="button"
+              className={`choice-btn ${profileForm.physicsOrHistory === option ? 'active' : ''}`}
+              onClick={() => setProfileForm({ ...profileForm, physicsOrHistory: option })}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-group compact-field full-width">
+        <label>选科（4选2）</label>
+        <div className="choice-grid">
+          {['化学', '政治', '生物', '地理'].map(subject => (
+            <button
+              key={subject}
+              type="button"
+              className={`choice-btn ${profileForm.subjects.includes(subject) ? 'active' : ''}`}
+              disabled={profileForm.subjects.length === 2 && !profileForm.subjects.includes(subject)}
+              onClick={() => toggleProfileSubject(subject)}
+            >
+              {subject}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return <div style={{ textAlign: 'center', padding: '2rem' }}>加载中...</div>;
+  }
+
+  // 注册：整页界面（不再使用模态框）
+  if (showAuth && authMode === 'register') {
+    return (
+      <div className="app register-page">
+        <header>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <span style={{ fontSize: '1.5rem' }}>🎓</span>
+            <span style={{ fontSize: '1.3rem', fontWeight: 'bold' }}>智选未来</span>
+          </div>
+          <button
+            className="login-btn"
+            onClick={() => {
+              setShowAuth(false);
+              setPendingVolunteerStart(false);
+              setErrors({});
+              setMessage({ type: '', text: '' });
+            }}
+          >
+            ← 返回首页
+          </button>
+        </header>
+
+        <div className="register-split">
+          {/* 左侧：高考主题宣传栏 */}
+          <aside className="register-promo">
+            <div className="register-promo-content">
+              <span className="register-promo-badge">2026 高考志愿填报</span>
+              <h1 className="register-promo-title">
+                一分不浪费<br />选对专业赢未来
+              </h1>
+              <p className="register-promo-desc">
+                填写高考成绩与省排名，系统结合历年录取数据，为你智能生成
+                「冲、稳、保」志愿方案。
+              </p>
+
+              <ul className="register-promo-features">
+                <li><span>🎯</span> 精准位次换算，锁定去年等效分</li>
+                <li><span>📊</span> 院校专业大数据，一键对比</li>
+                <li><span>🧭</span> 冲稳保梯度推荐，科学填报</li>
+                <li><span>🔒</span> 信息本地保存，隐私更安心</li>
+              </ul>
+
+              <div className="register-promo-stats">
+                <div>
+                  <strong>2000+</strong>
+                  <span>院校数据</span>
+                </div>
+                <div>
+                  <strong>800万</strong>
+                  <span>考生信赖</span>
+                </div>
+                <div>
+                  <strong>98%</strong>
+                  <span>录取匹配度</span>
+                </div>
+              </div>
+
+              <p className="register-promo-quote">“选择比努力更重要，志愿填报是人生第一次重大选择。”</p>
+            </div>
+          </aside>
+
+          {/* 右侧：注册表单 */}
+          <div className="register-form-panel">
+            <div className="register-form-inner">
+              <div className="register-form-head">
+                <h2>创建账户</h2>
+                <p>只需一步，即可获取专属志愿推荐</p>
+              </div>
+
+              {message.text && (
+                <div className={message.type === 'success' ? 'success-message' : 'error-message'}>
+                  {message.text}
+                </div>
+              )}
+
+              <form onSubmit={handleRegister}>
+                {/* 账户信息 */}
+                <div className="register-field-group">
+                  <div className="register-field-group-title">账户信息</div>
+
+                  <div className="form-group">
+                    <label>邮箱</label>
+                    <input
+                      type="email"
+                      placeholder="请输入邮箱地址"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (errors.email) setErrors({ ...errors, email: '' });
+                      }}
+                    />
+                    {errors.email && <span className="error-text">{errors.email}</span>}
+                  </div>
+
+                  <div className="form-group">
+                    <label>密码</label>
+                    <div className="password-input-group">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="至少8位，含大小写、数字及符号"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          if (errors.password) setErrors({ ...errors, password: '' });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        onClick={() => setShowPassword(!showPassword)}
+                        title={showPassword ? '隐藏密码' : '显示密码'}
+                      >
+                        {showPassword ? '👁️' : '👁️‍🗨️'}
+                      </button>
+                    </div>
+                    {password && (
+                      <ul className="password-checks">
+                        {getPasswordChecks(password).map((c) => (
+                          <li key={c.label} className={c.ok ? 'ok' : ''}>
+                            <span>{c.ok ? '✓' : '○'}</span> {c.label}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {errors.password && <span className="error-text">{errors.password}</span>}
+                  </div>
+
+                  <div className="form-group">
+                    <label>确认密码</label>
+                    <div className="password-input-group">
+                      <input
+                        type={showPasswordConfirm ? 'text' : 'password'}
+                        placeholder="请再次输入密码"
+                        value={passwordConfirm}
+                        onChange={(e) => {
+                          setPasswordConfirm(e.target.value);
+                          if (errors.passwordConfirm) setErrors({ ...errors, passwordConfirm: '' });
+                        }}
+                        onBlur={() => {
+                          if (passwordConfirm && passwordConfirm !== password) {
+                            setErrors((prev) => ({ ...prev, passwordConfirm: '两次密码输入不一致' }));
+                          } else {
+                            setErrors((prev) => ({ ...prev, passwordConfirm: '' }));
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
+                        title={showPasswordConfirm ? '隐藏密码' : '显示密码'}
+                      >
+                        {showPasswordConfirm ? '👁️' : '👁️‍🗨️'}
+                      </button>
+                    </div>
+                    {errors.passwordConfirm && <span className="error-text">{errors.passwordConfirm}</span>}
+                  </div>
+
+                  <div className="form-group">
+                    <label>验证码</label>
+                    <div className="code-input-group">
+                      <input
+                        type="text"
+                        placeholder="请输入验证码"
+                        value={verificationCode}
+                        onChange={(e) => {
+                          setVerificationCode(e.target.value);
+                          if (errors.code) setErrors({ ...errors, code: '' });
+                        }}
+                        maxLength={6}
+                      />
+                      <button
+                        type="button"
+                        className="code-btn"
+                        onClick={handleSendCode}
+                        disabled={codeCount > 0 || sendingCode || !email}
+                      >
+                        {codeCount > 0 ? `${codeCount}s` : sendingCode ? '发送中' : '发送'}
+                      </button>
+                    </div>
+                    {errors.code && <span className="error-text">{errors.code}</span>}
+                  </div>
+                </div>
+
+                {/* 填报基础信息 */}
+                <div className="register-field-group">
+                  <div className="register-field-group-title">填报基础信息</div>
+                  <p className="register-field-group-hint">请填写完整，后续可在个人资料页修改。</p>
+                  {errors.profile && <span className="error-text">{errors.profile}</span>}
+                  {renderProfileFields({ hideLastYearScore: true })}
+                </div>
+
+                <button type="submit" className="register-submit-btn">注册并保存信息</button>
+              </form>
+
+              <div className="auth-toggle">
+                <span>
+                  已有账户？
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('login');
+                      setPendingVolunteerStart(false);
+                      setErrors({});
+                      setMessage({ type: '', text: '' });
+                    }}
+                  >
+                    返回登录
+                  </button>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -514,14 +1159,113 @@ export default function App() {
           <a href="#universities" style={{ textDecoration: 'none', color: '#333', transition: 'color 0.3s' }} onMouseEnter={(e) => (e.currentTarget.style.color = '#0066cc')} onMouseLeave={(e) => (e.currentTarget.style.color = '#333')}>高校查询</a>
           <a href="#news" style={{ textDecoration: 'none', color: '#333', transition: 'color 0.3s' }} onMouseEnter={(e) => (e.currentTarget.style.color = '#0066cc')} onMouseLeave={(e) => (e.currentTarget.style.color = '#333')}>资讯中心</a>
         </nav>
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button className="login-btn" onClick={() => { setAuthMode('login'); setShowAuth(true); }}>登录</button>
-          <button className="register-btn" onClick={() => { setAuthMode('register'); setShowAuth(true); }}>注册</button>
+        <div className="header-actions">
+          {isLoggedIn && currentUser ? (
+            <div className="profile-area">
+              <button className="profile-trigger" onClick={() => setShowProfileMenu(!showProfileMenu)}>
+                <span className="profile-avatar">{currentUser.name.slice(0, 1).toUpperCase()}</span>
+                <span className="profile-name">{currentUser.name}</span>
+                <span className="profile-arrow">▾</span>
+              </button>
+
+              {showProfileMenu && (
+                <div className="profile-menu">
+                  <div className="profile-info">
+                    <div className="profile-info-name">{currentUser.name}</div>
+                    <div className="profile-info-email">{currentUser.email}</div>
+                  </div>
+                  <button
+                    className="profile-menu-item"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      setProfileForm(getVolunteerDataFromUser(currentUser));
+                      setIsProfileEditing(false);
+                      setCurrentPage('profile');
+                      window.scrollTo(0, 0);
+                    }}
+                  >
+                    个人资料
+                  </button>
+                  <button className="profile-menu-item logout" onClick={handleLogout}>
+                    退出登录
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <button className="login-btn" onClick={() => { setAuthMode('login'); setShowAuth(true); }}>登录</button>
+              <button className="register-btn" onClick={() => { setAuthMode('register'); setShowAuth(true); }}>注册</button>
+            </>
+          )}
         </div>
       </header>
 
       <main>
-        {currentPage === 'recommendation' ? (
+        {currentPage === 'profile' ? (
+          <div className="profile-page">
+            <div className="profile-card">
+              <div className="profile-page-header">
+                <div>
+                  <h2>个人资料</h2>
+                  <p>系统会根据这些信息直接生成志愿推荐，注册后也可以随时修改。</p>
+                </div>
+                {currentUser && (
+                  <div className="profile-page-user">
+                    <span className="profile-avatar large">{currentUser.name.slice(0, 1).toUpperCase()}</span>
+                    <div>
+                      <div className="profile-info-name">{currentUser.name}</div>
+                      <div className="profile-info-email">{currentUser.email}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {profileMessage.text && (
+                <div className={profileMessage.type === 'success' ? 'success-message' : 'error-message'}>
+                  {profileMessage.text}
+                </div>
+              )}
+
+              {isProfileEditing
+                ? renderProfileFields()
+                : renderProfileSummary(getVolunteerDataFromUser(currentUser))}
+
+              <div className="profile-actions">
+                {isProfileEditing ? (
+                  <>
+                    <button className="cancel-btn" onClick={() => {
+                      setProfileForm(getVolunteerDataFromUser(currentUser));
+                      setIsProfileEditing(false);
+                      setProfileMessage({ type: '', text: '' });
+                    }}>
+                      取消
+                    </button>
+                    <button className="submit-btn" onClick={() => handleSaveProfile()}>
+                      保存资料
+                    </button>
+                    <button className="start-btn" onClick={() => handleSaveProfile({ goRecommendation: true })}>
+                      保存并生成推荐
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="submit-btn" onClick={() => {
+                      setProfileForm(getVolunteerDataFromUser(currentUser));
+                      setIsProfileEditing(true);
+                      setProfileMessage({ type: '', text: '' });
+                    }}>
+                      修改资料
+                    </button>
+                    <button className="start-btn" onClick={handleStartVolunteer}>
+                      生成推荐
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : currentPage === 'recommendation' ? (
           <div style={{ minHeight: 'calc(100vh - 100px)', backgroundColor: '#f9fafb', padding: '2rem' }}>
             <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
               {/* User Input Info */}
@@ -1000,7 +1744,7 @@ export default function App() {
                   </ul>
                 </div>
 
-                <button className="start-btn" onClick={() => setShowVolunteerForm(true)}>
+                <button className="start-btn" onClick={handleStartVolunteer}>
                   开始填报
                 </button>
               </div>
@@ -1348,142 +2092,61 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Auth Modal */}
-      {showAuth && (
+      {/* Auth Modal（仅登录使用；注册已改为整页界面） */}
+      {showAuth && authMode === 'login' && (
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-header">
-              <h2>{authMode === 'login' ? '登录' : '注册'}</h2>
-              <button onClick={() => setShowAuth(false)}>✕</button>
+              <h2>登录</h2>
+              <button onClick={() => {
+                setShowAuth(false);
+                setPendingVolunteerStart(false);
+                setMessage({ type: '', text: '' });
+              }}>✕</button>
             </div>
 
-            {authMode === 'login' ? (
-              <form onSubmit={(e) => { e.preventDefault(); alert('功能演示'); }}>
-                <div className="form-group">
-                  <label>邮箱</label>
-                  <input type="email" placeholder="请输入邮箱" />
-                </div>
-                <div className="form-group">
-                  <label>密码</label>
-                  <input type="password" placeholder="请输入密码" />
-                </div>
-                <button type="submit">登录</button>
-              </form>
-            ) : (
-              <form onSubmit={handleRegister}>
-                {message.text && (
-                  <div className={message.type === 'success' ? 'success-message' : 'error-message'}>
-                    {message.text}
-                  </div>
-                )}
-
-                {/* 邮箱 */}
-                <div className="form-group">
-                  <label>邮箱</label>
-                  <input
-                    type="email"
-                    placeholder="请输入邮箱地址"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (errors.email) setErrors({ ...errors, email: '' });
-                    }}
-                  />
-                  {errors.email && <span className="error-text">{errors.email}</span>}
-                </div>
-
-                {/* 验证码 */}
-                <div className="form-group">
-                  <label>验证码</label>
-                  <div className="code-input-group">
-                    <input
-                      type="text"
-                      placeholder="请输入验证码"
-                      value={verificationCode}
-                      onChange={(e) => {
-                        setVerificationCode(e.target.value);
-                        if (errors.code) setErrors({ ...errors, code: '' });
-                      }}
-                      maxLength={6}
-                    />
-                    <button
-                      type="button"
-                      className="code-btn"
-                      onClick={handleSendCode}
-                      disabled={codeCount > 0 || !email}
-                    >
-                      {codeCount > 0 ? `${codeCount}s` : '发送'}
-                    </button>
-                  </div>
-                  {errors.code && <span className="error-text">{errors.code}</span>}
-                </div>
-
-                {/* 密码 */}
-                <div className="form-group">
-                  <label>密码</label>
-                  <div className="password-input-group">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="至少8位，包含大小写字母、数字和特殊字符"
-                      value={password}
-                      onChange={(e) => {
-                        setPassword(e.target.value);
-                        if (errors.password) setErrors({ ...errors, password: '' });
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle"
-                      onClick={() => setShowPassword(!showPassword)}
-                      title={showPassword ? '隐藏密码' : '显示密码'}
-                    >
-                      {showPassword ? '👁️' : '👁️‍🗨️'}
-                    </button>
-                  </div>
-                  {errors.password && <span className="error-text">{errors.password}</span>}
-                </div>
-
-                {/* 确认密码 */}
-                <div className="form-group">
-                  <label>确认密码</label>
-                  <div className="password-input-group">
-                    <input
-                      type={showPasswordConfirm ? 'text' : 'password'}
-                      placeholder="请再次输入密码"
-                      value={passwordConfirm}
-                      onChange={(e) => {
-                        setPasswordConfirm(e.target.value);
-                        if (errors.passwordConfirm) setErrors({ ...errors, passwordConfirm: '' });
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle"
-                      onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
-                      title={showPasswordConfirm ? '隐藏密码' : '显示密码'}
-                    >
-                      {showPasswordConfirm ? '👁️' : '👁️‍🗨️'}
-                    </button>
-                  </div>
-                  {errors.passwordConfirm && <span className="error-text">{errors.passwordConfirm}</span>}
-                </div>
-
-                <button type="submit">注册</button>
-              </form>
+            {message.text && (
+              <div className={message.type === 'success' ? 'success-message' : 'error-message'}>
+                {message.text}
+              </div>
             )}
+
+            <form onSubmit={handleLogin}>
+              <div className="form-group">
+                <label>邮箱</label>
+                <input
+                  type="email"
+                  placeholder="请输入邮箱"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>密码</label>
+                <input
+                  type="password"
+                  placeholder="请输入密码"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                />
+              </div>
+              <button type="submit">登录</button>
+            </form>
 
             <div className="auth-toggle">
               <span>
-                {authMode === 'login' ? '没有账户？' : '已有账户？'}
+                没有账户？
                 <button
                   type="button"
                   onClick={() => {
-                    setAuthMode(authMode === 'login' ? 'register' : 'login');
+                    setAuthMode('register');
+                    setPendingVolunteerStart(false);
                     setErrors({});
                     setMessage({ type: '', text: '' });
+                    setProfileForm(getVolunteerDataFromUser(currentUser));
                   }}
                 >
-                  {authMode === 'login' ? '立即注册' : '返回登录'}
+                  立即注册
                 </button>
               </span>
             </div>

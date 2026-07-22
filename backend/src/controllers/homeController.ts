@@ -1,29 +1,22 @@
-import { Request, Response } from 'express';
-import pool from '../db/database';
+import type { Request, Response } from 'express';
+import db from '../db/sqlite';
 
-export const getCarousel = async (req: Request, res: Response) => {
+export const getCarousel = async (_req: Request, res: Response) => {
   try {
-    const result = await pool.query(
-      `SELECT c.id, c.major_id, m.name, c.title, c.description, c.image_url
-       FROM carousel_items c
-       LEFT JOIN majors m ON c.major_id = m.id
-       ORDER BY c.display_order ASC`
-    );
-    res.json(result.rows);
+    const rows = db.prepare('SELECT id, title, description, image_url FROM carousel_items ORDER BY sort_order ASC').all();
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching carousel:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-export const getFeaturedMajors = async (req: Request, res: Response) => {
+export const getFeaturedMajors = async (_req: Request, res: Response) => {
   try {
-    const result = await pool.query(
-      `SELECT id, name, category, description, job_prospects, avg_salary
-       FROM majors
-       LIMIT 6`
-    );
-    res.json(result.rows);
+    const rows = db.prepare(
+      'SELECT id, name, category, description, job_prospects, avg_salary FROM majors ORDER BY sort_order ASC LIMIT 6'
+    ).all();
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching featured majors:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -33,47 +26,38 @@ export const getFeaturedMajors = async (req: Request, res: Response) => {
 export const getNews = async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 5;
-    const result = await pool.query(
-      `SELECT id, title, content, category, views, created_at
-       FROM news
-       ORDER BY created_at DESC
-       LIMIT $1`,
-      [limit]
-    );
-    res.json(result.rows);
+    const rows = db.prepare(
+      'SELECT id, title, content, category, views, created_at FROM news ORDER BY created_at DESC LIMIT ?'
+    ).all(limit);
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching news:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-export const getHomeData = async (req: Request, res: Response) => {
+// 院校推荐库（前端结合考生分数计算分数线）
+export const getColleges = async (_req: Request, res: Response) => {
   try {
-    const carousel = await pool.query(
-      `SELECT c.id, c.major_id, m.name, c.title, c.description, c.image_url
-       FROM carousel_items c
-       LEFT JOIN majors m ON c.major_id = m.id
-       ORDER BY c.display_order ASC`
-    );
+    const rows = db.prepare('SELECT * FROM colleges ORDER BY sort_order ASC').all();
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching colleges:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
-    const majors = await pool.query(
-      `SELECT id, name, category, description, job_prospects, avg_salary
-       FROM majors
-       LIMIT 6`
-    );
+export const getHomeData = async (_req: Request, res: Response) => {
+  try {
+    const carousel = db.prepare('SELECT id, title, description, image_url FROM carousel_items ORDER BY sort_order ASC').all();
+    const majors = db.prepare(
+      'SELECT id, name, category, description, job_prospects, avg_salary FROM majors ORDER BY sort_order ASC LIMIT 6'
+    ).all();
+    const news = db.prepare(
+      'SELECT id, title, content, category, views, created_at FROM news ORDER BY created_at DESC LIMIT 5'
+    ).all();
 
-    const news = await pool.query(
-      `SELECT id, title, content, category, views, created_at
-       FROM news
-       ORDER BY created_at DESC
-       LIMIT 5`
-    );
-
-    res.json({
-      carousel: carousel.rows,
-      featuredMajors: majors.rows,
-      news: news.rows,
-    });
+    res.json({ carousel, featuredMajors: majors, news });
   } catch (error) {
     console.error('Error fetching home data:', error);
     res.status(500).json({ error: 'Internal server error' });

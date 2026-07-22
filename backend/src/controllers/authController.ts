@@ -1,92 +1,146 @@
-import { Request, Response } from 'express';
-import pool from '../db/database';
+import type { Request, Response } from 'express';
 import crypto from 'crypto';
+import db from '../db/sqlite';
 
 const hashPassword = (password: string) => {
   return crypto.createHash('sha256').update(password).digest('hex');
 };
 
+// 数据库行 → 前端使用的用户对象（不含密码）
+const rowToUser = (row: any) => {
+  if (!row) return null;
+  let subjects: string[] = [];
+  try {
+    subjects = row.subjects ? JSON.parse(row.subjects) : [];
+  } catch {
+    subjects = [];
+  }
+  return {
+    email: row.email,
+    name: row.name || '',
+    score: row.score || '',
+    ranking: row.ranking || '',
+    lastYearScore: row.last_year_score || '',
+    province: row.province || '',
+    physicsOrHistory: row.physics_or_history || '',
+    subjects,
+  };
+};
+
+// 注册：写入 SQLite
 export const register = async (req: Request, res: Response) => {
   try {
-    const { email, password, username } = req.body;
+    const {
+      email,
+      password,
+      name,
+      score,
+      ranking,
+      lastYearScore,
+      province,
+      physicsOrHistory,
+      subjects,
+    } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      return res.status(400).json({ error: '邮箱和密码不能为空' });
     }
 
-    const hashedPassword = hashPassword(password);
+    // 邮箱是否已存在
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existing) {
+      return res.status(409).json({ error: '该邮箱已注册' });
+    }
 
-    const result = await pool.query(
-      'INSERT INTO users (email, password, username) VALUES ($1, $2, $3) RETURNING id, email, username, created_at',
-      [email, hashedPassword, username || email.split('@')[0]]
+    db.prepare(
+      `INSERT INTO users
+        (email, password, name, score, ranking, last_year_score, province, physics_or_history, subjects)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      email,
+      hashPassword(password),
+      name || email.split('@')[0] || '用户',
+      String(score ?? ''),
+      String(ranking ?? ''),
+      String(lastYearScore ?? ''),
+      province || '',
+      physicsOrHistory || '',
+      JSON.stringify(Array.isArray(subjects) ? subjects : [])
     );
 
-    res.status(201).json({
-      message: 'User registered successfully',
-      user: result.rows[0],
-    });
-  } catch (error: any) {
-    if (error.code === '23505') {
-      return res.status(409).json({ error: 'Email already exists' });
-    }
-    console.error('Error registering user:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    res.status(201).json({ message: '注册成功', user: rowToUser(row) });
+  } catch (error) {
+    console.error('注册失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
   }
 };
 
+// 登录：校验邮箱 + 密码
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      return res.status(400).json({ error: '邮箱和密码不能为空' });
     }
 
-    const hashedPassword = hashPassword(password);
-
-    const result = await pool.query(
-      'SELECT id, email, username, created_at FROM users WHERE email = $1 AND password = $2',
-      [email, hashedPassword]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+    const row: any = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (!row || row.password !== hashPassword(password)) {
+      return res.status(401).json({ error: '邮箱或密码错误' });
     }
 
-    const user = result.rows[0];
-    const token = crypto.randomBytes(32).toString('hex');
-
-    res.json({
-      message: 'Login successful',
-      user,
-      token,
-    });
+    res.json({ message: '登录成功', user: rowToUser(row) });
   } catch (error) {
-    console.error('Error logging in:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('登录失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
   }
 };
 
-export const getCurrentUser = async (req: Request, res: Response) => {
+// 更新个人资料
+export const updateProfile = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const {
+      email,
+      name,
+      score,
+      ranking,
+      lastYearScore,
+      province,
+      physicsOrHistory,
+      subjects,
+    } = req.body;
 
-    if (!userId) {
-      return res.status(401).json({ error: 'Not authenticated' });
+    if (!email) {
+      return res.status(400).json({ error: '缺少邮箱' });
     }
 
-    const result = await pool.query(
-      'SELECT id, email, username, created_at FROM users WHERE id = $1',
-      [userId]
+    const row: any = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (!row) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    db.prepare(
+      `UPDATE users SET
+        name = ?, score = ?, ranking = ?, last_year_score = ?,
+        province = ?, physics_or_history = ?, subjects = ?,
+        updated_at = datetime('now','localtime')
+       WHERE email = ?`
+    ).run(
+      name ?? row.name,
+      String(score ?? ''),
+      String(ranking ?? ''),
+      String(lastYearScore ?? ''),
+      province || '',
+      physicsOrHistory || '',
+      JSON.stringify(Array.isArray(subjects) ? subjects : []),
+      email
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json(result.rows[0]);
+    const updated = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    res.json({ message: '资料已更新', user: rowToUser(updated) });
   } catch (error) {
-    console.error('Error fetching current user:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('更新资料失败:', error);
+    res.status(500).json({ error: '服务器内部错误' });
   }
 };
